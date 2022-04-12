@@ -6,6 +6,7 @@ package main
 
 import (
 	"log"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -18,6 +19,7 @@ const (
 	optionNamePort               = "port"
 	optionNameTokenEncryptionKey = "token-encryption-key"
 	optionNameAdminPasswordHash  = "admin-password"
+	optionNameForwardURL         = "forward-url"
 )
 
 func main() {
@@ -32,6 +34,7 @@ func main() {
 	cmd.Flags().Int(optionNamePort, 1633, "Port to run on.")
 	cmd.Flags().String(optionNameTokenEncryptionKey, "", "encryption key for token")
 	cmd.Flags().String(optionNameAdminPasswordHash, "", "bcrypt hash of the admin password to get the security token")
+	cmd.Flags().String(optionNameForwardURL, "http://localhost:1633", "the URL of the bee instance we want to proxy")
 
 	if err := viper.BindPFlags(cmd.Flags()); err != nil {
 		log.Fatal(err)
@@ -45,23 +48,32 @@ func main() {
 type cli struct {
 	port                    int
 	password, encryptionKey string
+	forwardURL              string
 }
 
 func (c *cli) setupConfig(cmd *cobra.Command, args []string) (err error) {
 	c.port = viper.GetInt(optionNamePort)
 	c.encryptionKey = viper.GetString(optionNameTokenEncryptionKey)
 	c.password = viper.GetString(optionNameAdminPasswordHash)
+	c.forwardURL = viper.GetString(optionNameForwardURL)
 	return
 }
 
 func (c *cli) run(cmd *cobra.Command, args []string) (err error) {
-	auth, err := New(c.encryptionKey, c.password)
+	auth, err := newAuthenticator(c.encryptionKey, c.password)
 	if err != nil {
 		return
 	}
-	app := proxy{auth: auth, port: c.port}
+
+	rem, err := url.Parse(c.forwardURL)
+	if err != nil {
+		return
+	}
+
+	app := proxy{auth: auth, port: c.port, scheme: rem.Scheme, host: rem.Host}
 	app.init()
 	go app.run()
+
 	sigc := make(chan os.Signal, 1)
 	signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
 	<-sigc

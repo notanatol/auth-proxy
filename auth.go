@@ -33,7 +33,7 @@ type authenticator struct {
 	enforcer     *casbin.Enforcer
 }
 
-func New(encryptionKey, passwordHash string) (*authenticator, error) {
+func newAuthenticator(encryptionKey, passwordHash string) (*authenticator, error) {
 	m, err := model.NewModelFromString(`
 	[request_definition]
 	r = sub, obj, act
