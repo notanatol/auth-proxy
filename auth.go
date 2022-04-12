@@ -14,7 +14,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
 	"time"
 
 	"github.com/casbin/casbin/v2"
@@ -155,30 +154,25 @@ func (a *authenticator) RefreshKey(apiKey string, expiryDuration int) (string, e
 func (a *authenticator) Enforce(apiKey, obj, act string) (bool, error) {
 	decoded, err := base64.StdEncoding.DecodeString(apiKey)
 	if err != nil {
-		log.Println("decode token", err)
 		return false, err
 	}
 
 	decryptedBytes, err := a.ciph.decrypt(decoded)
 	if err != nil {
-		log.Println("decrypt token", err)
 		return false, err
 	}
 
 	var ar authRecord
 	if err := json.Unmarshal(decryptedBytes, &ar); err != nil {
-		log.Println("unmarshal token", err)
 		return false, err
 	}
 
 	if time.Now().After(ar.Expiry) {
-		log.Println("token expired")
 		return false, errTokenExpired
 	}
 
 	allow, err := a.enforcer.Enforce(ar.Role, obj, act)
 	if err != nil {
-		log.Println("enforce", err)
 		return false, err
 	}
 

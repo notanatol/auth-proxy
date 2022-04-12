@@ -6,6 +6,7 @@ require (
 	github.com/casbin/casbin/v2 v2.35.0
 	github.com/ethersphere/bee v1.5.1
 	github.com/gorilla/mux v1.8.0
+	github.com/sirupsen/logrus v1.8.1
 	github.com/spf13/cobra v1.4.0
 	github.com/spf13/viper v1.10.1
 	golang.org/x/crypto v0.0.0-20220315160706-3147a52a75dd
