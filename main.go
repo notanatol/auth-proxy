@@ -1,3 +1,7 @@
+// Copyright 2022 The Swarm Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
 package main
 
 import (
@@ -10,6 +14,12 @@ import (
 	"github.com/spf13/viper"
 )
 
+const (
+	optionNamePort               = "port"
+	optionNameTokenEncryptionKey = "token-encryption-key"
+	optionNameAdminPasswordHash  = "admin-password"
+)
+
 func main() {
 	cli := &cli{}
 
@@ -19,7 +29,9 @@ func main() {
 		RunE:    cli.run,
 	}
 
-	cmd.Flags().Int("port", 1633, "Port to run on.")
+	cmd.Flags().Int(optionNamePort, 1633, "Port to run on.")
+	cmd.Flags().String(optionNameTokenEncryptionKey, "", "encryption key for token")
+	cmd.Flags().String(optionNameAdminPasswordHash, "", "bcrypt hash of the admin password to get the security token")
 
 	if err := viper.BindPFlags(cmd.Flags()); err != nil {
 		log.Fatal(err)
@@ -31,18 +43,28 @@ func main() {
 }
 
 type cli struct {
-	port uint32
+	port                    int
+	password, encryptionKey string
 }
 
 func (c *cli) setupConfig(cmd *cobra.Command, args []string) (err error) {
-	c.port = viper.GetUint32("port")
+	c.port = viper.GetInt(optionNamePort)
+	c.encryptionKey = viper.GetString(optionNameTokenEncryptionKey)
+	c.password = viper.GetString(optionNameAdminPasswordHash)
 	return
 }
 
 func (c *cli) run(cmd *cobra.Command, args []string) (err error) {
-	log.Println("starting on port", c.port)
+	auth, err := New(c.encryptionKey, c.password)
+	if err != nil {
+		return
+	}
+	app := proxy{auth: auth, port: c.port}
+	app.init()
+	go app.run()
 	sigc := make(chan os.Signal, 1)
 	signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
 	<-sigc
+	app.shutdown()
 	return
 }
