@@ -25,6 +25,7 @@ func main() {
 	cli := &cli{}
 
 	cmd := &cobra.Command{
+		Short:   "proxies the calls to an ingress address separating internal and external http routes",
 		Use:     "auth-proxy",
 		PreRunE: cli.setupConfig,
 		RunE:    cli.run,
@@ -49,11 +50,20 @@ type cli struct {
 	ingressURL   string
 }
 
-func (c *cli) setupConfig(cmd *cobra.Command, args []string) (err error) {
+func (c *cli) setupConfig(cmd *cobra.Command, args []string) error {
+	viper.SetConfigName("config")
+	viper.SetConfigType("yaml")
+	viper.SetConfigType("yml")
+	viper.AddConfigPath(".")
+	if err := viper.ReadInConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+			return err
+		}
+	}
 	c.internalPort = viper.GetInt(optionNameInternalPort)
 	c.externalPort = viper.GetInt(optionNameExternalPort)
 	c.ingressURL = viper.GetString(optionNameIngressURL)
-	return
+	return nil
 }
 
 func (c *cli) run(cmd *cobra.Command, args []string) (err error) {
@@ -61,7 +71,6 @@ func (c *cli) run(cmd *cobra.Command, args []string) (err error) {
 	if err != nil {
 		return
 	}
-
 	app := proxy{
 		internalPort: c.internalPort,
 		externalPort: c.externalPort,
@@ -71,9 +80,11 @@ func (c *cli) run(cmd *cobra.Command, args []string) (err error) {
 	app.init()
 	go app.run()
 
-	sigc := make(chan os.Signal, 1)
-	signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
-	<-sigc
+	done := make(chan os.Signal, 1)
+	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+
+	<-done
+
 	app.shutdown()
 	return
 }

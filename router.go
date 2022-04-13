@@ -6,6 +6,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -19,12 +20,12 @@ import (
 )
 
 type proxy struct {
-	internalPort   int
-	externalPort   int
-	scheme, host   string
-	internalRouter *mux.Router
-	externalRouter *mux.Router
-	client         *http.Client
+	internalPort int
+	externalPort int
+	scheme, host string
+	internal     *http.Server
+	external     *http.Server
+	client       *http.Client
 }
 
 func (app *proxy) init() {
@@ -47,27 +48,36 @@ func (app *proxy) init() {
 		return match
 	}).HandlerFunc(app.forwardHandler)
 
-	app.externalRouter = external
-	app.internalRouter = internal
-	app.client = &http.Client{
-		// TODO Transport: initTransport(),
-	}
+	app.external = newServer(app.externalPort, external)
+	app.internal = newServer(app.internalPort, internal)
+	app.client = newClient()
 }
 
 func (app *proxy) run() {
-	// TODO graceful shutdown
 	go func() {
 		log.Info().Int("port", app.internalPort).Msg("starting internal")
-		log.Fatal().Err(http.ListenAndServe(fmt.Sprintf(":%d", app.internalPort), app.internalRouter))
+		if err := app.internal.ListenAndServe(); err != http.ErrServerClosed {
+			log.Fatal().Err(err)
+		}
 	}()
 	log.Info().Int("port", app.externalPort).Msg("starting external")
-	err := http.ListenAndServe(fmt.Sprintf(":%d", app.externalPort), app.externalRouter)
-	log.Fatal().Err(err)
+	if err := app.external.ListenAndServe(); err != http.ErrServerClosed {
+		log.Fatal().Err(err)
+	}
 }
 
 func (app *proxy) shutdown() {
-	log.Warn().Msg("shutting down")
+	log.Warn().Msg("shutting down...")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := app.internal.Shutdown(ctx); err != nil && err != context.Canceled {
+		panic(err)
+	}
+	if err := app.external.Shutdown(ctx); err != nil && err != context.Canceled {
+		panic(err)
+	}
 	app.client.CloseIdleConnections()
+	log.Warn().Msg("done.")
 }
 
 func (app *proxy) forwardHandler(w http.ResponseWriter, req *http.Request) {
