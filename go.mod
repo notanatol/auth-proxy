@@ -3,18 +3,13 @@ module github.com/ethersphere/auth-proxy
 go 1.18
 
 require (
-	github.com/casbin/casbin/v2 v2.35.0
-	github.com/ethersphere/bee v1.5.1
 	github.com/gorilla/mux v1.8.0
-	github.com/sirupsen/logrus v1.8.1
+	github.com/rs/zerolog v1.26.1
 	github.com/spf13/cobra v1.4.0
 	github.com/spf13/viper v1.10.1
-	golang.org/x/crypto v0.0.0-20220315160706-3147a52a75dd
-	resenje.org/web v0.6.0
 )
 
 require (
-	github.com/Knetic/govaluate v3.0.1-0.20171022003610-9aa49832a739+incompatible // indirect
 	github.com/fsnotify/fsnotify v1.5.1 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect

@@ -6,193 +6,74 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"net/http"
 	"os"
-	"regexp"
-	"strings"
+	"time"
 
-	"github.com/ethersphere/bee/pkg/jsonhttp"
 	"github.com/gorilla/mux"
-	log "github.com/sirupsen/logrus"
-	"resenje.org/web"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
 type proxy struct {
-	port         int
-	scheme, host string
-	router       *mux.Router
-	auth         *authenticator
-	client       *http.Client
-	// logger       *logrus.Logger
+	internalPort   int
+	externalPort   int
+	scheme, host   string
+	internalRouter *mux.Router
+	externalRouter *mux.Router
+	client         *http.Client
 }
 
 func (app *proxy) init() {
-	// log := logrus.New()
-	log.SetOutput(os.Stdout)
-	log.SetLevel(log.InfoLevel)
-	// log = log
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339})
+	zerolog.SetGlobalLevel(zerolog.TraceLevel)
 
-	router := mux.NewRouter()
-	router.NotFoundHandler = http.HandlerFunc(jsonhttp.NotFoundHandler)
-	router.Handle("/auth", jsonhttp.MethodHandler{
-		"POST": web.ChainHandlers(
-			jsonhttp.NewMaxBodyBytesHandler(512),
-			web.FinalHandlerFunc(app.authHandler),
-		),
-	})
-	router.Handle("/refresh", jsonhttp.MethodHandler{
-		"POST": web.ChainHandlers(
-			jsonhttp.NewMaxBodyBytesHandler(512),
-			web.FinalHandlerFunc(app.refreshHandler),
-		),
-	})
-
-	router.MatcherFunc(func(r *http.Request, rm *mux.RouteMatch) bool {
-		match, err := regexp.MatchString("/*", r.URL.Path)
-		if err != nil {
-			log.WithField("err", err).Error("regex matching")
-		}
+	external := mux.NewRouter()
+	external.MatcherFunc(func(r *http.Request, _ *mux.RouteMatch) bool {
+		// external - exclusive (ban list)
+		log.Info().Msg(r.URL.Path)
+		match := forbid.Match(r.URL.Path)
+		log.Debug().Str("path", r.URL.Path).Bool("match", match).Msg("external")
 		return match
 	}).HandlerFunc(app.forwardHandler)
 
-	app.router = router
+	internal := mux.NewRouter()
+	internal.MatcherFunc(func(r *http.Request, _ *mux.RouteMatch) bool {
+		// internal - inclusive
+		match := allow.Match(r.URL.Path)
+		log.Debug().Str("path", r.URL.Path).Bool("match", match).Msg("internal")
+		return match
+	}).HandlerFunc(app.forwardHandler)
+
+	app.externalRouter = external
+	app.internalRouter = internal
 	app.client = &http.Client{
 		// TODO Transport: initTransport(),
 	}
 }
 
 func (app *proxy) run() {
-	log.WithField("port", app.port).Info("starting")
-	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", app.port), app.router))
+	go func() {
+		log.Info().Int("port", app.internalPort).Msg("starting internal")
+		log.Fatal().Err(http.ListenAndServe(fmt.Sprintf(":%d", app.internalPort), app.internalRouter))
+	}()
+	log.Info().Int("port", app.externalPort).Msg("starting external")
+	err := http.ListenAndServe(fmt.Sprintf(":%d", app.externalPort), app.externalRouter)
+	log.Fatal().Err(err)
 }
 
 func (app *proxy) shutdown() {
-	log.Warn("shutting down")
+	log.Warn().Msg("shutting down")
 	app.client.CloseIdleConnections()
-}
-
-type securityTokenRsp struct {
-	Key string `json:"key"`
-}
-
-type securityTokenReq struct {
-	Role   string `json:"role"`
-	Expiry int    `json:"expiry"`
-}
-
-func (app *proxy) authHandler(w http.ResponseWriter, r *http.Request) {
-	_, pass, ok := r.BasicAuth()
-
-	if !ok {
-		log.Error("api: auth handler: missing basic auth")
-		w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
-		jsonhttp.Unauthorized(w, "Unauthorized")
-		return
-	}
-
-	if !app.auth.Authorize(pass) {
-		log.Error("api: auth handler: unauthorized")
-		w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
-		jsonhttp.Unauthorized(w, "Unauthorized")
-		return
-	}
-
-	body, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		log.Debugf("api: auth handler: read request body: %v", err)
-		log.WithField("err", err).Error("api: auth handler: read request body")
-		jsonhttp.BadRequest(w, "Read request body")
-		return
-	}
-
-	var payload securityTokenReq
-	if err = json.Unmarshal(body, &payload); err != nil {
-		log.Debugf("api: auth handler: unmarshal request body: %v", err)
-		log.WithField("err", err).Error("api: auth handler: unmarshal request body")
-		jsonhttp.BadRequest(w, "Unmarshal json body")
-		return
-	}
-
-	key, err := app.auth.GenerateKey(payload.Role, payload.Expiry)
-	if errors.Is(err, errInvalidExpiry) {
-		log.Debugf("api: auth handler: generate key: %v", err)
-		log.WithField("err", err).Error("api: auth handler: generate key")
-		jsonhttp.BadRequest(w, "Expiry duration must be a positive number")
-		return
-	}
-	if err != nil {
-		log.Debugf("api: auth handler: add auth token: %v", err)
-		log.WithField("err", err).Error("api: auth handler: add auth token")
-		jsonhttp.InternalServerError(w, "Error generating authorization token")
-		return
-	}
-
-	jsonhttp.Created(w, securityTokenRsp{
-		Key: key,
-	})
-}
-
-func (app *proxy) refreshHandler(w http.ResponseWriter, r *http.Request) {
-	reqToken := r.Header.Get("Authorization")
-	if !strings.HasPrefix(reqToken, "Bearer ") {
-		jsonhttp.Forbidden(w, "Missing bearer token")
-		return
-	}
-
-	keys := strings.Split(reqToken, "Bearer ")
-
-	if len(keys) != 2 || strings.Trim(keys[1], " ") == "" {
-		jsonhttp.Forbidden(w, "Missing security token")
-		return
-	}
-
-	authToken := keys[1]
-
-	body, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		log.Debugf("api: auth handler: read request body: %v", err)
-		log.Error("api: auth handler: read request body")
-		jsonhttp.BadRequest(w, "Read request body")
-		return
-	}
-
-	var payload securityTokenReq
-	if err = json.Unmarshal(body, &payload); err != nil {
-		log.Debugf("api: auth handler: unmarshal request body: %v", err)
-		log.Error("api: auth handler: unmarshal request body")
-		jsonhttp.BadRequest(w, "Unmarshal json body")
-		return
-	}
-
-	key, err := app.auth.RefreshKey(authToken, payload.Expiry)
-	if errors.Is(err, errTokenExpired) {
-		log.Debugf("api: auth handler: refresh key: %v", err)
-		log.Error("api: auth handler: refresh key")
-		jsonhttp.BadRequest(w, "Token expired")
-		return
-	}
-
-	if err != nil {
-		log.Debugf("api: auth handler: refresh token: %v", err)
-		log.Error("api: auth handler: refresh token")
-		jsonhttp.InternalServerError(w, "Error refreshing authorization token")
-		return
-	}
-
-	jsonhttp.Created(w, securityTokenRsp{
-		Key: key,
-	})
 }
 
 func (app *proxy) forwardHandler(w http.ResponseWriter, req *http.Request) {
 	body, err := ioutil.ReadAll(req.Body)
 	if err != nil {
-		log.WithField("err", err).Error("read request body")
+		log.Error().Err(err).Msg("read request body")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -203,7 +84,7 @@ func (app *proxy) forwardHandler(w http.ResponseWriter, req *http.Request) {
 
 	proxyReq, err := http.NewRequest(req.Method, url, bytes.NewReader(body))
 	if err != nil {
-		log.WithField("err", err).Error("new request", err)
+		log.Error().Err(err).Msg("new request")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -215,7 +96,7 @@ func (app *proxy) forwardHandler(w http.ResponseWriter, req *http.Request) {
 
 	resp, err := app.client.Do(proxyReq)
 	if err != nil {
-		log.WithField("err", err).Error("execute request", err)
+		log.Error().Err(err).Msg("execute request")
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}

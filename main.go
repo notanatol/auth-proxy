@@ -16,10 +16,9 @@ import (
 )
 
 const (
-	optionNamePort               = "port"
-	optionNameTokenEncryptionKey = "token-encryption-key"
-	optionNameAdminPasswordHash  = "admin-password"
-	optionNameForwardURL         = "forward-url"
+	optionNameInternalPort = "internal-port"
+	optionNameExternalPort = "external-port"
+	optionNameIngressURL   = "ingress-url"
 )
 
 func main() {
@@ -31,10 +30,9 @@ func main() {
 		RunE:    cli.run,
 	}
 
-	cmd.Flags().Int(optionNamePort, 1633, "Port to run on.")
-	cmd.Flags().String(optionNameTokenEncryptionKey, "", "encryption key for token")
-	cmd.Flags().String(optionNameAdminPasswordHash, "", "bcrypt hash of the admin password to get the security token")
-	cmd.Flags().String(optionNameForwardURL, "http://localhost:1633", "the URL of the bee instance we want to proxy")
+	cmd.Flags().Int(optionNameInternalPort, 1633, "Internal port for whitelisted resources.")
+	cmd.Flags().Int(optionNameExternalPort, 1635, "External port for blacklisted resources.")
+	cmd.Flags().String(optionNameIngressURL, "http://localhost:1633", "the URL of the ingress")
 
 	if err := viper.BindPFlags(cmd.Flags()); err != nil {
 		log.Fatal(err)
@@ -46,31 +44,30 @@ func main() {
 }
 
 type cli struct {
-	port                    int
-	password, encryptionKey string
-	forwardURL              string
+	internalPort int
+	externalPort int
+	ingressURL   string
 }
 
 func (c *cli) setupConfig(cmd *cobra.Command, args []string) (err error) {
-	c.port = viper.GetInt(optionNamePort)
-	c.encryptionKey = viper.GetString(optionNameTokenEncryptionKey)
-	c.password = viper.GetString(optionNameAdminPasswordHash)
-	c.forwardURL = viper.GetString(optionNameForwardURL)
+	c.internalPort = viper.GetInt(optionNameInternalPort)
+	c.externalPort = viper.GetInt(optionNameExternalPort)
+	c.ingressURL = viper.GetString(optionNameIngressURL)
 	return
 }
 
 func (c *cli) run(cmd *cobra.Command, args []string) (err error) {
-	auth, err := newAuthenticator(c.encryptionKey, c.password)
+	ingress, err := url.Parse(c.ingressURL)
 	if err != nil {
 		return
 	}
 
-	rem, err := url.Parse(c.forwardURL)
-	if err != nil {
-		return
+	app := proxy{
+		internalPort: c.internalPort,
+		externalPort: c.externalPort,
+		scheme:       ingress.Scheme,
+		host:         ingress.Host,
 	}
-
-	app := proxy{auth: auth, port: c.port, scheme: rem.Scheme, host: rem.Host}
 	app.init()
 	go app.run()
 
