@@ -30,8 +30,8 @@ func main() {
 		RunE:    cli.run,
 	}
 
-	cmd.Flags().Int(optionNameInternalPort, 1633, "Internal port for whitelisted resources.")
-	cmd.Flags().Int(optionNameExternalPort, 1635, "External port for blacklisted resources.")
+	cmd.Flags().Int(optionNameInternalPort, 1643, "Internal port for whitelisted resources.")
+	cmd.Flags().Int(optionNameExternalPort, 1645, "External port for blacklisted resources.")
 	cmd.Flags().String(optionNameIngressURL, "http://localhost:1633", "the URL of the ingress")
 
 	if err := viper.BindPFlags(cmd.Flags()); err != nil {

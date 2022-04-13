@@ -4,34 +4,26 @@ This application will run between the bee instance and the outer world providing
 
 To start:
 
-> go run . --port 1633 --token-encryption-key enc-key --admin-password '$2a$12$E7ROtngtkl1ymzqXLWhgGO9Fw3Ih0heG5gDgvnewrRYeBhtoBnCrq'
+> go run . --internal-port 1643 --external-port 1645 --ingress-url 'http://localhost:1633'
 
-To get an auth token:
+To access an internal endpoint (whitelisted):
 
 ```sh
-curl --request POST \
-  --url http://localhost:1633/auth \
-  --header 'authorization: Basic OmhlbGxv' \
-  --header 'content-type: application/json' \
-  --data '{"role": "maintainer","expiry": 315360000}'
+curl -vv localhost:1643/pins
 ```
 
 you should get a similar response:
 
 ```json
 {
-   "key" : "933lBcBLOM96hpPRtUL0x3G3c5ixbgkSh2mQbxyNPTY3mHAghyiui5IHgngvQsrhbLRlbS4VOrViCymKnMtX7O4/jYclDvE45D/9AJUoQvvKGhNS6upq"
+   "references" : []
 }
 ```
 
-To refresh it for a new one that will expire in 15 seconds:
+To access an external endpoint (blacklisted):
 
 ```sh
-export key=933lBcBLOM96hpPRtUL0x3G3c5ixbgkSh2mQbxyNPTY3mHAghyiui5IHgngvQsrhbLRlbS4VOrViCymKnMtX7O4/jYclDvE45D/9AJUoQvvKGhNS6upq
-
-curl --request POST \
-  --url http://localhost:1633/refresh \
-  --header "authorization: Bearer $key" \
-  --header 'content-type: application/json' \
-  --data '{"expiry": 15}'
+curl -vv localhost:1645/node
 ```
+
+The response code should be `404` since `node` endpoint is blocklisted on the external route.

@@ -34,16 +34,15 @@ func (app *proxy) init() {
 	external := mux.NewRouter()
 	external.MatcherFunc(func(r *http.Request, _ *mux.RouteMatch) bool {
 		// external - exclusive (ban list)
-		log.Info().Msg(r.URL.Path)
-		match := forbid.Match(r.URL.Path)
+		match := forbidden.Match(r.URL.Path)
 		log.Debug().Str("path", r.URL.Path).Bool("match", match).Msg("external")
-		return match
+		return !match
 	}).HandlerFunc(app.forwardHandler)
 
 	internal := mux.NewRouter()
 	internal.MatcherFunc(func(r *http.Request, _ *mux.RouteMatch) bool {
 		// internal - inclusive
-		match := allow.Match(r.URL.Path)
+		match := allowed.Match(r.URL.Path)
 		log.Debug().Str("path", r.URL.Path).Bool("match", match).Msg("internal")
 		return match
 	}).HandlerFunc(app.forwardHandler)
@@ -56,6 +55,7 @@ func (app *proxy) init() {
 }
 
 func (app *proxy) run() {
+	// TODO graceful shutdown
 	go func() {
 		log.Info().Int("port", app.internalPort).Msg("starting internal")
 		log.Fatal().Err(http.ListenAndServe(fmt.Sprintf(":%d", app.internalPort), app.internalRouter))

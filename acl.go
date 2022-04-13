@@ -8,12 +8,9 @@ import (
 	"regexp"
 )
 
-type (
-	whiteList []string
-	blockList []string
-)
+type matcher []string
 
-func (w whiteList) Match(url string) bool {
+func (w matcher) Match(url string) bool {
 	for _, path := range w {
 		match, _ := regexp.MatchString(path, url) // TODO optimize with cached matchers
 		if match {
@@ -23,17 +20,7 @@ func (w whiteList) Match(url string) bool {
 	return false
 }
 
-func (w blockList) Match(url string) bool {
-	for _, path := range w {
-		match, _ := regexp.MatchString(path, url) // TODO optimize with cached matchers
-		if match {
-			return false
-		}
-	}
-	return true
-}
-
-var allow = whiteList([]string{
+var allowed = matcher([]string{
 	"/bytes",
 	"/bytes/*",
 	"/chunks",
@@ -79,7 +66,7 @@ var allow = whiteList([]string{
 	"/stewardship/*",
 })
 
-var forbid = blockList([]string{
+var forbidden = matcher([]string{
 	"/node",
 	"/health",
 	"/readiness",
