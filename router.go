@@ -92,7 +92,7 @@ func (app *proxy) forwardHandler(w http.ResponseWriter, req *http.Request) {
 
 	url := fmt.Sprintf("%s://%s%s", app.scheme, app.host, req.RequestURI)
 
-	proxyReq, err := http.NewRequest(req.Method, url, bytes.NewReader(body))
+	proxyReq, err := http.NewRequestWithContext(req.Context(), req.Method, url, bytes.NewReader(body))
 	if err != nil {
 		log.Error().Err(err).Msg("new request")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -121,5 +121,7 @@ func (app *proxy) forwardHandler(w http.ResponseWriter, req *http.Request) {
 	}
 
 	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	if _, err = io.Copy(w, resp.Body); err != nil {
+		log.Error().Err(err).Msg("write response body")
+	}
 }
